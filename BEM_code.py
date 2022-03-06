@@ -106,7 +106,7 @@ class BladeElement:
 
 
 class Blade:
-    def __init__(self, no_blades, path, airfoils):
+    def __init__(self, no_blades, airfoil, r_start, r_end, blade_pitch, n_elements):
         self.b = no_blades
 
         self.power = None
@@ -118,21 +118,21 @@ class Blade:
         self.p_n_list = None
         self.p_t_list = None
 
-        # Load the blade data from the file
-        file = open(path)
-        file_lines = file.readlines()
-        file.close()
+        # Divide the blade up in n_elements pieces;
+        for i in range(n_elements):
+            r = r_start + (r_end - r_end)/n_elements * i
+            self.r_list.append(r)
+            # Sorry for hardcoding the equations below- taken from the assignment description :)
+            twist = 14*(1-r/r_end)
+            chord = (3*(1-r/r_end)+1)
 
-        data_raw = [0, 0, 0, 0]
-        self.blade_elements = {}
-        for line in file_lines:
-            data_raw = [float(value) for value in line.strip("\n").split("\t")]
-            self.blade_elements[data_raw[0]] = BladeElement(data_raw[0], data_raw[2], data_raw[1], data_raw[3],
-                                                            airfoils)
-            self.r_list.append(data_raw[0])
+            # BladeElement takes in argument relative_pitch, I assume that this means total? So offset with the blade pitch
+            relative_pitch = blade_pitch + twist
+
+            self.blade_elements[i] = BladeElement(r, chord, relative_pitch, 0, airfoil)
 
         self.r_list = np.array(self.r_list)
-        self.r = data_raw[0]
+        self.r = r_start
 
     def find_pn_pt(self, v_0, theta_p, omega):
         # Initialise the lists for p_n and p_t
