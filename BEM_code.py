@@ -1,60 +1,23 @@
 import numpy as np
 import scipy.integrate as spig
-import scipy.interpolate as spip
 
 relaxation = 0.25
 rho = 1.225
 
 
-class Airfoils:
+class DU95W150:
     def __init__(self):
-        # list of thicknesses of the given airfoils
-        thickness_list = (241, 301, 360, 480, 600, 1000)
+        data = read_from_file('DU95W150.csv')
+        self.alpha_lst = data[:, 0]
+        self.cl_lst = data[:, 1]
+        self.cd_lst = data[:, 2]
+        self.cm_lst = data[:, 3]
 
-        # Initialise data lists
-        data_raw = list()
-        cl_list = list()
-        cd_list = list()
-        cm_list = list()
+    def cl(self, _, alpha): return np.interp(alpha, self.alpha_lst, self.cl_lst)
 
-        # Iterate through the list of thicknesses
-        for i, t in enumerate(thickness_list):
-            # Read the corresponding airfoil data file
-            file = open(f"airfoil_data/FFA-W3-{t}.txt")
-            file_lines = file.readlines()
-            file.close()
-            # Format the data to usable format
-            data_raw = [line.strip("\n").split("\t") for line in file_lines]
+    def cd(self, _, alpha): return np.interp(alpha, self.alpha_lst, self.cd_lst)
 
-            # Isolate the values for lift, drag and moment at different aoa's
-            # Add each list of values to the correct 2d array
-            cl_list.append([float(line[1]) for line in data_raw])
-            cd_list.append([float(line[2]) for line in data_raw])
-            cm_list.append([float(line[3]) for line in data_raw])
-
-        # List all the aoa's, assuming all airfoil data has the same amount of points
-        aoa_list = (*(float(line[0]) for line in data_raw),)
-
-        # Make the lists numpy arrays for use in interpolation
-        # These are 2d arrays with the variation with thickness in axis 0 and variation in angle of attack in axis 1
-        self.cl_list = np.array(cl_list)
-        self.cd_list = np.array(cd_list)
-        self.cm_list = np.array(cm_list)
-
-        # The tuple with the data points for the interpolation function
-        self.points = (thickness_list, aoa_list)
-
-    # Function to get the lift coefficient interpolated withing the range of thickness and aoa
-    def cl(self, thickness, alpha):
-        return spip.interpn(self.points, self.cl_list, (thickness, alpha), method="linear")[0]
-
-    # Function to get the drag coefficient interpolated withing the range of thickness and aoa
-    def cd(self, thickness, alpha):
-        return spip.interpn(self.points, self.cd_list, (thickness, alpha), method="linear")[0]
-
-    # Function to get the moment coefficient interpolated withing the range of thickness and aoa
-    def cm(self, thickness, alpha):
-        return spip.interpn(self.points, self.cm_list, (thickness, alpha), method="linear")[0]
+    def cm(self, _, alpha): return np.interp(alpha, self.alpha_lst, self.cm_lst)
 
 
 class BladeElement:
@@ -206,3 +169,10 @@ class Blade:
 def interpolate(value1, value2, co1, co2, co_interpolation):
     dy_dx = (value2 - value1) / (co2 - co1)
     return dy_dx * (co_interpolation - co1) + value1
+
+
+def read_from_file(path):
+    f = open(path)
+    lines = f.readlines()
+    out_list = [[float(num) for num in line.strip('\n').split(',')] for line in lines]
+    return np.array(out_list)
