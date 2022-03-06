@@ -13,19 +13,18 @@ class DU95W150:
         self.cd_lst = data[:, 2]
         self.cm_lst = data[:, 3]
 
-    def cl(self, _, alpha): return np.interp(alpha, self.alpha_lst, self.cl_lst)
+    def cl(self, alpha): return np.interp(alpha, self.alpha_lst, self.cl_lst)
 
-    def cd(self, _, alpha): return np.interp(alpha, self.alpha_lst, self.cd_lst)
+    def cd(self, alpha): return np.interp(alpha, self.alpha_lst, self.cd_lst)
 
-    def cm(self, _, alpha): return np.interp(alpha, self.alpha_lst, self.cm_lst)
+    def cm(self, alpha): return np.interp(alpha, self.alpha_lst, self.cm_lst)
 
 
 class BladeElement:
-    def __init__(self, pos_r: float, chord: float, relative_pitch: float, thickness: float, airfoil):
+    def __init__(self, pos_r: float, chord: float, relative_pitch: float, airfoil):
         self.r = pos_r
         self.c = chord
         self.beta = relative_pitch
-        self.tc = 10 * thickness
 
         self.a = None
         self.a_prime = None
@@ -35,7 +34,7 @@ class BladeElement:
         self.airfoil = airfoil()
 
     def __repr__(self):
-        return f"<Blade Element at r={self.r}, c={self.c}, beta={self.beta}, t/c={self.tc}>"
+        return f"<Blade Element at r={self.r}, c={self.c}, beta={self.beta}>"
 
     def determine_loads(self, v_0, omega, theta_p, b, r_blade):
         # Set initial loop values
@@ -51,8 +50,8 @@ class BladeElement:
             alpha = np.degrees(phi) - self.beta - theta_p
 
             # With the angle of attack, determine the lift and drag coefficient from airfoil data interpolation
-            cl = self.airfoil.cl(self.tc, alpha)
-            cd = self.airfoil.cd(self.tc, alpha)
+            cl = self.airfoil.cl(alpha)
+            cd = self.airfoil.cd(alpha)
 
             # Use these to find the normal and tangential force coefficients
             cn = cl * np.cos(phi) + cd * np.sin(phi)
@@ -118,9 +117,10 @@ class Blade:
         self.p_n_list = None
         self.p_t_list = None
 
+        self.blade_elements = list()
         # Divide the blade up in n_elements pieces;
         for i in range(n_elements):
-            r = r_start + (r_end - r_end)/n_elements * i
+            r = r_start + (r_end - r_start)/n_elements * i
             self.r_list.append(r)
             # Sorry for hardcoding the equations below- taken from the assignment description :)
             twist = 14*(1-r/r_end)
@@ -129,16 +129,16 @@ class Blade:
             # BladeElement takes in argument relative_pitch, I assume that this means total? So offset with the blade pitch
             relative_pitch = blade_pitch + twist
 
-            self.blade_elements[i] = BladeElement(r, chord, relative_pitch, 0, airfoil)
+            self.blade_elements.append(BladeElement(r, chord, relative_pitch, airfoil))
 
         self.r_list = np.array(self.r_list)
-        self.r = r_start
+        self.r = r_end
 
     def find_pn_pt(self, v_0, theta_p, omega):
         # Initialise the lists for p_n and p_t
         p_n_list, p_t_list = list(), list()
-        for r, blade in self.blade_elements.items():
-            if r < self.r:
+        for blade in self.blade_elements:
+            if blade.r < self.r:
                 blade.determine_loads(v_0, omega, theta_p, self.b, self.r)
                 p_n, p_t = blade.get_loads()
 
@@ -176,3 +176,10 @@ def read_from_file(path):
     lines = f.readlines()
     out_list = [[float(num) for num in line.strip('\n').split(',')] for line in lines]
     return np.array(out_list)
+
+
+if __name__ == '__main__':
+    turbine = Blade(3, DU95W150, 0.2 * 50, 50, -2, 50)
+    print(turbine.blade_elements, turbine.r_list)
+    turbine.determine_cp_ct(10, 6, 0)
+    print(turbine.c_power)
