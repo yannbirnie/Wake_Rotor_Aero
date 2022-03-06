@@ -119,7 +119,7 @@ class Blade:
 
         self.blade_elements = list()
         # Divide the blade up in n_elements pieces;
-        for i in range(n_elements):
+        for i in range(n_elements + 1):
             r = r_start + (r_end - r_start)/n_elements * i
             self.r_list.append(r)
             # Sorry for hardcoding the equations below- taken from the assignment description :)
