@@ -1,5 +1,7 @@
 import numpy as np
 import scipy.integrate as spig
+import matplotlib.pyplot as plt
+
 
 relaxation = 0.25
 rho = 1.225
@@ -180,6 +182,14 @@ def read_from_file(path):
 
 if __name__ == '__main__':
     turbine = Blade(3, DU95W150, 0.2 * 50, 50, -2, 50)
-    print(turbine.blade_elements, turbine.r_list)
-    turbine.determine_cp_ct(10, 6, 0)
-    print(turbine.c_power)
+    tsr = np.arange(1, 20, 0.1)
+    cp = np.zeros(tsr.shape)
+    for i, lamda in enumerate(tsr):
+        turbine.determine_cp_ct(10, lamda, 0)
+        cp[i] = turbine.c_power
+
+    plt.xlabel("$\\lambda\\ [-]$")
+    plt.ylabel("$C_P\\ [-]$")
+    plt.tight_layout()
+    plt.plot(tsr, cp)
+    plt.show()
