@@ -30,6 +30,8 @@ class BladeElement:
 
         self.a = None
         self.a_prime = None
+        self.phi = None
+        self.alpha = None
         self.p_n = None
         self.p_t = None
 
@@ -38,7 +40,9 @@ class BladeElement:
     def __repr__(self):
         return f"<Blade Element at r={self.r}, c={self.c}, beta={self.beta}>"
 
-    def determine_loads(self, v_0, omega, theta_p, b, r_blade):
+    def determine_loads(self, v_0, omega, theta_p, b, r_blade, yaw, azimuth):
+        yaw = np.radians(yaw)
+        azimuth = np.radians(azimuth)
         # Set initial loop values
         self.a = 0
         self.a_prime = 0
@@ -47,17 +51,22 @@ class BladeElement:
         i = 0
         # Iterative solver for a and a_prime until the difference between the iterations becomes very small
         while True:
+            xi = (0.6 * self.a + 1) * yaw
+            K_xi = 2 * np.tan(xi / 2)
+            u_tangential = (omega * self.r - v_0 * np.sin(yaw) * np.sin(azimuth)) * (1 + self.a_prime)
+            u_normal = v_0 * (np.cos(yaw) - self.a * (1 + K_xi * self.r * np.sin(azimuth - np.pi / 2) / r_blade))
+
             # For the previous a and a_prime, find the flow angle and angle of attack
-            phi = np.arctan2(((1 - self.a) * v_0), ((1 + self.a_prime) * omega * self.r))
-            alpha = np.degrees(phi) - self.beta - theta_p
+            self.phi = np.arctan2(u_normal, u_tangential)
+            self.alpha = np.degrees(self.phi) - self.beta - theta_p
 
             # With the angle of attack, determine the lift and drag coefficient from airfoil data interpolation
-            cl = self.airfoil.cl(alpha)
-            cd = self.airfoil.cd(alpha)
+            cl = self.airfoil.cl(self.alpha)
+            cd = self.airfoil.cd(self.alpha)
 
             # Use these to find the normal and tangential force coefficients
-            cn = cl * np.cos(phi) + cd * np.sin(phi)
-            ct = cl * np.sin(phi) - cd * np.cos(phi)
+            cn = cl * np.cos(self.phi) + cd * np.sin(self.phi)
+            ct = cl * np.sin(self.phi) - cd * np.cos(self.phi)
 
             # Break conditions for the a-loop
             if error_a <= 10 ** (-6) and error_a_dash <= 10 ** (-6):
@@ -67,19 +76,19 @@ class BladeElement:
 
             # Determine the solidity and Prandtl’s tip loss correction
             solidity = self.c * b / (2 * np.pi * self.r)
-            f = (2/np.pi) * np.arccos(np.exp(-(b * (r_blade - self.r) / (2 * self.r * np.sin(abs(phi))))))
+            f = (2/np.pi) * np.arccos(np.exp(-(b * (r_blade - self.r) / (2 * self.r * np.sin(abs(self.phi))))))
 
             # Determine the new a and a_prime
             if self.a >= 0.33:
-                c_thrust = ((1 - self.a) ** 2 * cn * solidity) / (np.sin(phi) ** 2)
+                c_thrust = ((1 - self.a) ** 2 * cn * solidity) / (np.sin(self.phi) ** 2)
 
                 a_star = c_thrust / (4 * f * (1 - 0.25*(5 - 3 * self.a) * self.a))
                 a_new = relaxation * a_star + (1-relaxation) * self.a
 
             else:
-                a_new = 1 / ((4 * f * np.sin(phi)**2) / (solidity * cn) + 1)
+                a_new = 1 / ((4 * f * np.sin(self.phi)**2) / (solidity * cn) + 1)
 
-            a_prime_new = 1 / ((4 * f * np.sin(phi) * np.cos(phi)) / (solidity * ct) - 1)
+            a_prime_new = 1 / ((4 * f * np.sin(self.phi) * np.cos(self.phi)) / (solidity * ct) - 1)
 
             # Determine the difference between this and the previous iteration
             error_a = abs(a_new - self.a)
@@ -91,9 +100,7 @@ class BladeElement:
             i += 1
 
         # Determine the relative velocity with the velocity triangle
-        v_n = (1 + self.a_prime) * omega * self.r
-        v_t = (1 - self.a) * v_0
-        v_rel = np.sqrt(v_n**2 + v_t**2)
+        v_rel = np.sqrt(u_normal**2 + u_tangential**2)
 
         # Using the previous calculations, find the forces on the blade element
         self.p_n = 0.5 * rho * v_rel ** 2 * self.c * cn
@@ -136,12 +143,12 @@ class Blade:
         self.r_list = np.array(self.r_list)
         self.r = r_end
 
-    def find_pn_pt(self, v_0, theta_p, omega):
+    def find_pn_pt(self, v_0, theta_p, omega, yaw, azimuth):
         # Initialise the lists for p_n and p_t
         p_n_list, p_t_list = list(), list()
         for blade in self.blade_elements:
             if blade.r < self.r:
-                blade.determine_loads(v_0, omega, theta_p, self.b, self.r)
+                blade.determine_loads(v_0, omega, theta_p, self.b, self.r, yaw, azimuth)
                 p_n, p_t = blade.get_loads()
 
                 p_n_list.append(p_n)
@@ -153,15 +160,15 @@ class Blade:
 
         return np.array(p_n_list), np.array(p_t_list), self.r_list
 
-    def determine_cp_ct(self, v_0, lamda, theta_p):
+    def determine_cp_ct(self, v_0, lamda, theta_p, yaw, azimuth):
         # Determine the rotational speed of the turbine
         omega = lamda * v_0 / self.r
         # Get the loads on the blade elements
-        p_n_list, p_t_list, r_list = self.find_pn_pt(v_0, theta_p, omega)
+        self.p_n_list, self.p_t_list, r_list = self.find_pn_pt(v_0, theta_p, omega, yaw, azimuth)
 
         # Determine the thrust and power of the turbine
-        self.thrust = self.b * spig.trapz(p_n_list, self.r_list)
-        self.power = omega * self.b * spig.trapz(p_t_list * self.r_list, self.r_list)
+        self.thrust = self.b * spig.trapz(self.p_n_list, self.r_list)
+        self.power = omega * self.b * spig.trapz(self.p_t_list * self.r_list, self.r_list)
 
         # Determine the thrust and power coefficient
         self.c_thrust = self.thrust / (0.5 * rho * np.pi * self.r**2 * v_0**2)
@@ -185,7 +192,7 @@ if __name__ == '__main__':
     tsr = np.arange(1, 20, 0.1)
     cp = np.zeros(tsr.shape)
     for i, lamda in enumerate(tsr):
-        turbine.determine_cp_ct(10, lamda, 0)
+        turbine.determine_cp_ct(10, lamda, 0, 0, 0)
         cp[i] = turbine.c_power
 
     plt.xlabel("$\\lambda\\ [-]$")
