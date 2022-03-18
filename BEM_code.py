@@ -175,6 +175,56 @@ class Blade:
         self.c_power = self.power / (0.5 * rho * np.pi * self.r**2 * v_0**3)
 
 
+class Turbine:
+    def __init__(self):
+        self.blade = Blade(3, DU95W150, .2 * 50, 50, -2, 50)
+
+    def cp_lamda(self):
+        tsr = np.round(np.arange(4, 12.1, 0.1), 1)
+        cp = np.zeros(tsr.shape)
+        for i, lamda in enumerate(tsr):
+            self.blade.determine_cp_ct(10, lamda, 0, 0, 0)
+            cp[i] = self.blade.c_power
+
+            if lamda in (6, 8, 10):
+                plt.plot(lamda, self.blade.c_power, 'k^')
+
+        plt.xlabel("$\\lambda\\ [-]$")
+        plt.ylabel("$C_P\\ [-]$")
+        plt.tight_layout()
+        plt.plot(tsr, cp, 'k')
+        plt.show()
+
+    def no_yaw(self):
+        self.blade.determine_cp_ct(10, 8, 0, 0, 0)
+        pn, pt = self.blade.p_n_list, self.blade.p_t_list
+        alpha, phi, a, a_prime, twist = np.zeros((5, len(self.blade.blade_elements)))
+        for i, be in enumerate(self.blade.blade_elements):
+            alpha[i] = be.alpha
+            phi[i] = be.phi
+            a[i] = be.a
+            a_prime[i] = be.a_prime
+            twist[i] = be.beta
+
+        plt.figure(1)
+        plt.plot(self.blade.r_list, alpha, label='Angle of Attack ($\\alpha$)')
+        plt.plot(self.blade.r_list, np.degrees(phi), label='Inflow Angle ($\\phi$)')
+        plt.plot(self.blade.r_list, twist, label='Twist Angle ($\\beta$)')
+        plt.legend()
+
+        plt.figure(2)
+        plt.plot(self.blade.r_list, a, label='Axial Induction ($a$)')
+        plt.plot(self.blade.r_list, a_prime, label="Azimuthal Induction ($a'$)")
+        plt.legend()
+
+        plt.figure(3)
+        plt.plot(self.blade.r_list, pn, label='Thrust Loading ($p_n$)')
+        plt.plot(self.blade.r_list, pt, label="Azimuthal Loading ($p_t$)")
+        plt.legend()
+
+        plt.show()
+
+
 def interpolate(value1, value2, co1, co2, co_interpolation):
     dy_dx = (value2 - value1) / (co2 - co1)
     return dy_dx * (co_interpolation - co1) + value1
@@ -188,15 +238,6 @@ def read_from_file(path):
 
 
 if __name__ == '__main__':
-    turbine = Blade(3, DU95W150, 0.2 * 50, 50, -2, 50)
-    tsr = np.arange(1, 20, 0.1)
-    cp = np.zeros(tsr.shape)
-    for i, lamda in enumerate(tsr):
-        turbine.determine_cp_ct(10, lamda, 0, 0, 0)
-        cp[i] = turbine.c_power
-
-    plt.xlabel("$\\lambda\\ [-]$")
-    plt.ylabel("$C_P\\ [-]$")
-    plt.tight_layout()
-    plt.plot(tsr, cp)
-    plt.show()
+    turbine = Turbine()
+    # turbine.cp_lamda()
+    turbine.no_yaw()
