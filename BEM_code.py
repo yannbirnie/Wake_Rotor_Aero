@@ -39,6 +39,7 @@ class BladeElement:
         self.u_tangential = None
         self.u_normal = None
 
+        self.af = airfoil
         self.airfoil = airfoil()
 
     def __repr__(self):
@@ -135,7 +136,7 @@ class BladeElement:
             return self.p_n, self.p_t
 
     def reset(self):
-        self.a, self.a_prime, self.alpha, self.phi = 0, 0, 0, 0
+        self.__init__(self.r, self.c, self.beta, self.af)
 
 
 class Blade:
@@ -173,13 +174,8 @@ class Blade:
         p_n_list, p_t_list = list(), list()
         for blade in self.blade_elements:
             if blade.r < self.r:
-                try:
-                    blade.determine_loads(v_0, omega, theta_p, self.b, self.r, yaw, azimuth)
-                    p_n, p_t = blade.get_loads()
-                except ValueError as e:
-                    print(e)
-                    p_n, p_t = 0, 0
-                    blade.reset()
+                blade.determine_loads(v_0, omega, theta_p, self.b, self.r, yaw, azimuth)
+                p_n, p_t = blade.get_loads()
 
                 p_n_list.append(p_n)
                 p_t_list.append(p_t)
@@ -204,6 +200,10 @@ class Blade:
         self.c_thrust = self.thrust / (0.5 * rho * np.pi * self.r**2 * v_0**2)
         self.c_power = self.power / (0.5 * rho * np.pi * self.r**2 * v_0**3)
 
+    def reset(self):
+        for be in self.blade_elements:
+            be.reset()
+
 
 class Turbine:
     def __init__(self):
@@ -218,6 +218,8 @@ class Turbine:
 
             if lamda in (6, 8, 10):
                 plt.plot(lamda, self.blade.c_power, 'k^')
+
+            self.blade.reset()
 
         plt.xlabel("$\\lambda\\ [-]$")
         plt.ylabel("$C_P\\ [-]$")
@@ -270,11 +272,12 @@ class Turbine:
         r_grid, az_grid = np.meshgrid(self.blade.r_list[:-1], np.radians(azimuth))
 
         for i, y in enumerate(yaw):
-            fig1, (ax1, ax2) = plt.subplots(1, 2, subplot_kw=dict(projection='polar'), num=1)
-            fig2, (ax3, ax4) = plt.subplots(1, 2, subplot_kw=dict(projection='polar'), num=2)
-            fig3, (ax5, ax6) = plt.subplots(1, 2, subplot_kw=dict(projection='polar'), num=3)
+            fig1, (ax1, ax2) = plt.subplots(1, 2, num=1, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
+            fig2, (ax3, ax4) = plt.subplots(1, 2, num=2, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
+            fig3, (ax5, ax6) = plt.subplots(1, 2, num=3, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
+            fig4, (ax7, ax8) = plt.subplots(1, 2, num=4, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
 
-            alpha, phi, a, a_prime, pn, pt = np.zeros((6, azimuth.size, len(self.blade.blade_elements[:-1])))
+            alpha, phi, a, a_prime, pn, pt, un, ut = np.zeros((8, azimuth.size, len(self.blade.blade_elements[:-1])))
             for j, az in enumerate(azimuth):
                 # print(az)
                 self.blade.determine_cp_ct(10, 8, 0, y, az)
@@ -285,59 +288,79 @@ class Turbine:
                     phi[j, k] = be.phi
                     a[j, k] = be.axial_induction
                     a_prime[j, k] = be.azimuthal_induction
+                    un[j, k] = be.u_normal
+                    ut[j, k] = be.u_tangential
 
+                self.blade.reset()
 
-            ctr1 = ax1.contourf(az_grid, r_grid, alpha)
-            ctr11 = ax1.contour(az_grid, r_grid, alpha, colors='k')
-            ax1.set_yticks(np.arange(0, 50 + 10, 10))
-            cbar1 = fig1.colorbar(ctr1, ax=ax1)
+            color = 'k'
+            cmap = 'hot'
+            linewidth = .5
 
-            ctr2 = ax2.contourf(az_grid, r_grid, np.degrees(phi))
-            ctr21 = ax2.contour(az_grid, r_grid, np.degrees(phi), colors='k')
-            ax2.set_yticks(np.arange(0, 50 + 10, 10))
-            cbar2 = fig1.colorbar(ctr2, ax=ax2)
+            contour_plot(az_grid, r_grid, alpha, ax1, fig1,
+                         (cmap, color, linewidth, 'Angle of Attack $\\alpha$ [$^{\\circ}$]'))
+            contour_plot(az_grid, r_grid, np.degrees(phi), ax2, fig1,
+                         (cmap, color, linewidth, 'Inflow Angle $\\phi$ [$^{\\circ}$]'))
 
-            ctr3 = ax3.contourf(az_grid, r_grid, a)
-            ctr31 = ax3.contour(az_grid, r_grid, a, colors='k')
-            ax3.set_yticks(np.arange(0, 50 + 10, 10))
-            cbar3 = fig2.colorbar(ctr3, ax=ax3)
+            contour_plot(az_grid, r_grid, a, ax3, fig2,
+                         (cmap, color, linewidth, 'Axial Induction $a_{total}$ [-]'))
+            contour_plot(az_grid, r_grid, a_prime, ax4, fig2,
+                         (cmap, color, linewidth, "Azimuthal Induction $a'$ [-]"))
 
-            ctr4 = ax4.contourf(az_grid, r_grid, a_prime)
-            ctr41 = ax4.contour(az_grid, r_grid, a_prime, colors='k')
-            ax4.set_yticks(np.arange(0, 50 + 10, 10))
-            cbar4 = fig2.colorbar(ctr4, ax=ax4)
+            contour_plot(az_grid, r_grid, pn, ax5, fig3,
+                         (cmap, color, linewidth, 'Normal Force $p_n$ [N/m]'))
+            contour_plot(az_grid, r_grid, pt, ax6, fig3,
+                         (cmap, color, linewidth, 'Tangential Force $p_t$ [N/m]'))
 
-            ctr5 = ax5.contourf(az_grid, r_grid, pn)
-            ctr51 = ax5.contour(az_grid, r_grid, pn, colors='k')
-            ax5.set_yticks(np.arange(0, 50 + 10, 10))
-            cbar5 = fig3.colorbar(ctr5, ax=ax5)
+            contour_plot(az_grid, r_grid, un, ax7, fig4,
+                         (cmap, color, linewidth, 'Normal Velocity $u_n$ [m/s]'))
+            contour_plot(az_grid, r_grid, ut, ax8, fig4,
+                         (cmap, color, linewidth, 'Tangential Velocity $u_t$ [m/s]'))
 
-            ctr6 = ax6.contourf(az_grid, r_grid, pt)
-            ctr61 = ax6.contour(az_grid, r_grid, pt, colors='k')
-            ax6.set_yticks(np.arange(0, 50 + 10, 10))
-            cbar6 = fig3.colorbar(ctr6, ax=ax6)
-
+            fig1.tight_layout()
+            fig2.tight_layout()
+            fig3.tight_layout()
+            fig4.tight_layout()
             plt.show()
 
 
-def xi(a, yaw):
-    val = yaw.copy()
-    diff = 1
-    c = 0
-    relax = 0.1
-    while diff > 1e-3 and c < 1e2:
-        # new = np.arctan2(2 * np.tan(val / 2), 1 - np.tan(val / 2)**2)
-        new = relax * np.arctan2(np.sin(yaw) - a * np.tan(val/2), np.cos(yaw) - a) + (1 - relax) * val
-        diff = abs(new - val)
-        val = new
-        c += 1
+def contour_plot(az_grid, r_grid, values, axis, figure, options: tuple):
+    def contour_levels():
+        base_levels = np.linspace(0, 1, 1000)
 
-    # print(c)
-    if c < 1e3:
-        return val
-    else:
-        print(f'Not converged for yaw={yaw}, a={a}.')
-        return yaw
+        val_min = np.min(values)
+        val_max = np.max(values)
+
+        return base_levels * (val_max - val_min) + val_min
+
+    cmap, color, linewidth, label, *_ = options
+
+    axis.set_title(label)
+    ctr = axis.contourf(az_grid, r_grid, values, contour_levels(), cmap=cmap)
+    ctr1 = axis.contour(az_grid, r_grid, values, colors=color, linewidths=linewidth)
+    axis.set_yticks(np.arange(0, 50 + 10, 10))
+    cbar = figure.colorbar(ctr, ax=axis, ticks=ctr1.levels)
+
+
+def xi(a, yaw):
+    return (0.6 * a + 1) * yaw
+#     val = yaw.copy()
+#     diff = 1
+#     c = 0
+#     relax = 0.1
+#     while diff > 1e-3 and c < 1e2:
+#         # new = np.arctan2(2 * np.tan(val / 2), 1 - np.tan(val / 2)**2)
+#         new = relax * np.arctan2(np.sin(yaw) - a * np.tan(val/2), np.cos(yaw) - a) + (1 - relax) * val
+#         diff = abs(new - val)
+#         val = new
+#         c += 1
+#
+#     # print(c)
+#     if c < 1e3:
+#         return val
+#     else:
+#         print(f'Not converged for yaw={yaw}, a={a}.')
+#         return yaw
 
 
 def interpolate(value1, value2, co1, co2, co_interpolation):
