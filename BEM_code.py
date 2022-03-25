@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 relaxation = 0.1
 rho = 1.225
+p_atm = 101325 #pa
 
 
 class DU95W150:
@@ -143,6 +144,14 @@ class BladeElement:
         else:
             return self.p_n, self.p_t
 
+    def get_static_pressure_before_rotor(self):
+        # Using bernoulli
+        return p_atm + 0.5 * rho * (self.u_normal**2 * (1-(1-self.a)**2))
+
+    def get_static_pressure_after_rotor(self):
+        u02 = self.u_normal**2
+        return p_atm + 0.5 * rho * (u02*(1-self.a)**2 + u02*(1-2*self.a)**2)
+
     def reset(self):
         self.__init__(self.r, self.c, self.beta, self.af)
 
@@ -180,10 +189,10 @@ class Blade:
     def find_pn_pt(self, v_0, theta_p, omega, yaw, azimuth):
         # Initialise the lists for p_n and p_t
         p_n_list, p_t_list = list(), list()
-        for blade in self.blade_elements:
-            if self.r_list[0] < blade.r < self.r:
-                blade.determine_loads(v_0, omega, theta_p, self.b, self.r, self.r_list[0], yaw, azimuth)
-                p_n, p_t = blade.get_loads()
+        for blade_element in self.blade_elements:
+            if self.r_list[0] < blade_element.r < self.r:
+                blade_element.determine_loads(v_0, omega, theta_p, self.b, self.r, self.r_list[0], yaw, azimuth)
+                p_n, p_t = blade_element.get_loads()
 
                 p_n_list.append(p_n)
                 p_t_list.append(p_t)
@@ -331,6 +340,36 @@ class Turbine:
             # fig4.tight_layout()
         plt.show()
 
+    def enthalpy_distributions(self, v_0):
+        self.blade.determine_cp_ct(10, 8, 0, 0, 0)
+        # row = station, column is azimuthal pos
+        enthalpies = np.zeros((4, len(self.blade.blade_elements)))
+
+        for i, be in enumerate(self.blade.blade_elements):
+            # Ignore first and last one, not set because tip & root loss factors
+            if (i == 0 or i == len(self.blade.blade_elements)-1):
+                continue;
+
+            # At the end and the start, the static pressure is just the atmospheric pressure.
+            enthalpies[0,i] = p_atm/rho + 0.5*v_0**2
+            pressure_before_rotor = be.get_static_pressure_before_rotor()
+            enthalpies[1,i] = pressure_before_rotor/rho + 0.5*v_0**2 * (1-be.a)**2
+            pressure_after_rotor = be.get_static_pressure_after_rotor()
+            enthalpies[2,i] = pressure_after_rotor/rho + 0.5*v_0**2 * (-(1-be.a)**2 + (1-2*be.a)**2)
+            enthalpies[3,i] = p_atm/rho + 0.5 * v_0**2*(1-2*be.a)**2
+
+        # Do some nice plotssss
+        plt.figure(1)
+        plt.plot(self.blade.r_list, enthalpies[0], label='upwind')
+        plt.plot(self.blade.r_list, enthalpies[1], label='upwind rotor')
+        plt.plot(self.blade.r_list, enthalpies[2], label='downwind rotor')
+        plt.plot(self.blade.r_list, enthalpies[3], label='downwind')
+        plt.xlabel('$r$ [m]')
+        plt.ylabel('relative Specific enthalpy')
+        plt.grid()
+        plt.legend()
+        plt.show()
+
 
 def create_axes(num):
     fig, axes = plt.subplots(3, 2, num=num, subplot_kw=dict(projection='polar'), figsize=(8, 12), sharey='all')
@@ -403,8 +442,9 @@ def read_from_file(path):
 if __name__ == '__main__':
     turbine = Turbine()
     # turbine.cp_lamda()
-    # turbine.spanwise_distributions()
-    turbine.yaw_polar_plots()
+    #turbine.spanwise_distributions()
+    # turbine.yaw_polar_plots()
+    turbine.enthalpy_distributions(10)
 
     # a = .82
     # yaw = np.radians(30)
