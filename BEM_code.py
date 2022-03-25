@@ -84,6 +84,7 @@ class BladeElement:
             f = f_root * f_tip
 
             # Determine the new a and a_prime
+            # If it's higher than 0.33, use a glauert correction
             if self.a >= 0.33:
                 c_thrust = ((1 - self.a) ** 2 * cn * solidity) / (np.sin(self.phi) ** 2)
 
@@ -104,8 +105,13 @@ class BladeElement:
             self.a_prime = a_prime_new
             i += 1
 
+        # Determining skew angle of outgoing flow
         x = xi(self.a, yaw)
+
+        # Using Coleman's model for vortex cylinder in yaw
         K_xi = 2 * np.tan(x / 2)
+
+        # Using Glauert theory for yawed motion, determine separate induction factors. (slides 2.2.2:9)
         self.axial_induction = self.a * (1 + K_xi * self.r * np.sin(azimuth - np.pi / 2) / r_blade)
         self.azimuthal_induction = self.a_prime
 
@@ -361,6 +367,7 @@ def contour_plot(az_grid, r_grid, values, axes, figure, options: tuple):
 
 
 def xi(a, yaw):
+    # Using the approximation given in slides 2.2.2:12.
     return (0.6 * a + 1) * yaw
 #     val = yaw.copy()
 #     diff = 1
