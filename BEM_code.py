@@ -45,7 +45,7 @@ class BladeElement:
     def __repr__(self):
         return f"<Blade Element at r={self.r}, c={self.c}, beta={self.beta}>"
 
-    def determine_loads(self, v_0, omega, theta_p, b, r_blade, yaw, azimuth):
+    def determine_loads(self, v_0, omega, theta_p, b, r_blade, r_root, yaw, azimuth):
         yaw = np.radians(yaw)
         azimuth = np.radians(azimuth)
         # Set initial loop values
@@ -79,7 +79,9 @@ class BladeElement:
 
             # Determine the solidity and Prandtl’s tip loss correction
             solidity = self.c * b / (2 * np.pi * self.r)
-            f = (2/np.pi) * np.arccos(np.exp(-(b * (r_blade - self.r) / (2 * self.r * np.sin(abs(self.phi))))))
+            f_tip = (2/np.pi) * np.arccos(np.exp(-(b * (r_blade - self.r) / (2 * self.r * np.sin(abs(self.phi))))))
+            f_root = (2 / np.pi) * np.arccos(np.exp(-(b * (self.r - r_root) / (2 * self.r * np.sin(abs(self.phi))))))
+            f = f_root * f_tip
 
             # Determine the new a and a_prime
             if self.a >= 0.33:
@@ -173,16 +175,17 @@ class Blade:
         # Initialise the lists for p_n and p_t
         p_n_list, p_t_list = list(), list()
         for blade in self.blade_elements:
-            if blade.r < self.r:
-                blade.determine_loads(v_0, omega, theta_p, self.b, self.r, yaw, azimuth)
+            if self.r_list[0] < blade.r < self.r:
+                blade.determine_loads(v_0, omega, theta_p, self.b, self.r, self.r_list[0], yaw, azimuth)
                 p_n, p_t = blade.get_loads()
 
                 p_n_list.append(p_n)
                 p_t_list.append(p_t)
 
-        # Add zero load at the blade tip
-        p_n_list.append(0)
-        p_t_list.append(0)
+            else:
+                # Add zero load at the blade tip and root
+                p_n_list.append(0)
+                p_t_list.append(0)
 
         return np.array(p_n_list), np.array(p_t_list), self.r_list
 
@@ -207,7 +210,7 @@ class Blade:
 
 class Turbine:
     def __init__(self):
-        self.blade = Blade(3, DU95W150, .2 * 50, 50, -2, 80)
+        self.blade = Blade(3, DU95W150, .2 * 50, 50, -2, 20)
 
     def cp_lamda(self):
         tsr = np.round(np.arange(4, 12.1, 0.1), 1)
@@ -267,23 +270,22 @@ class Turbine:
         plt.show()
 
     def yaw_polar_plots(self):
-        yaw = (15, 30,)
+        yaw = (0, 15, 30,)
         azimuth = np.arange(0, 360 + 1, 1)
-        r_grid, az_grid = np.meshgrid(self.blade.r_list[:-1], np.radians(azimuth))
+        r_grid, az_grid = np.meshgrid(self.blade.r_list[1:-1], np.radians(azimuth))
+        fig1, (ax1, ax2) = create_axes(1)
+        fig2, (ax3, ax4) = create_axes(2)
+        fig3, (ax5, ax6) = create_axes(3)
+        fig4, (ax7, ax8) = create_axes(4)
 
         for i, y in enumerate(yaw):
-            fig1, (ax1, ax2) = plt.subplots(1, 2, num=1, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
-            fig2, (ax3, ax4) = plt.subplots(1, 2, num=2, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
-            fig3, (ax5, ax6) = plt.subplots(1, 2, num=3, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
-            fig4, (ax7, ax8) = plt.subplots(1, 2, num=4, subplot_kw=dict(projection='polar'), figsize=(9, 4.5))
-
-            alpha, phi, a, a_prime, pn, pt, un, ut = np.zeros((8, azimuth.size, len(self.blade.blade_elements[:-1])))
+            alpha, phi, a, a_prime, pn, pt, un, ut = np.zeros((8, azimuth.size, len(self.blade.blade_elements[1:-1])))
             for j, az in enumerate(azimuth):
                 # print(az)
                 self.blade.determine_cp_ct(10, 8, 0, y, az)
 
-                pn[j, :], pt[j, :] = self.blade.p_n_list[:-1], self.blade.p_t_list[:-1]
-                for k, be in enumerate(self.blade.blade_elements[:-1]):
+                pn[j, :], pt[j, :] = self.blade.p_n_list[1:-1], self.blade.p_t_list[1:-1]
+                for k, be in enumerate(self.blade.blade_elements[1:-1]):
                     alpha[j, k] = be.alpha
                     phi[j, k] = be.phi
                     a[j, k] = be.axial_induction
@@ -294,52 +296,68 @@ class Turbine:
                 self.blade.reset()
 
             color = 'k'
-            cmap = 'hot'
+            cmap = None
             linewidth = .5
 
             contour_plot(az_grid, r_grid, alpha, ax1, fig1,
-                         (cmap, color, linewidth, 'Angle of Attack $\\alpha$ [$^{\\circ}$]'))
+                         (i, cmap, color, linewidth, 0, 'Angle of Attack $\\alpha$ [$^{\\circ}$]'))
             contour_plot(az_grid, r_grid, np.degrees(phi), ax2, fig1,
-                         (cmap, color, linewidth, 'Inflow Angle $\\phi$ [$^{\\circ}$]'))
+                         (i, cmap, color, linewidth, 1, 'Inflow Angle $\\phi$ [$^{\\circ}$]'))
 
             contour_plot(az_grid, r_grid, a, ax3, fig2,
-                         (cmap, color, linewidth, 'Axial Induction $a_{total}$ [-]'))
+                         (i, cmap, color, linewidth, 2, 'Axial Induction $a_{total}$ [-]'))
             contour_plot(az_grid, r_grid, a_prime, ax4, fig2,
-                         (cmap, color, linewidth, "Azimuthal Induction $a'$ [-]"))
+                         (i, cmap, color, linewidth, 3, "Azimuthal Induction $a'$ [-]"))
 
             contour_plot(az_grid, r_grid, pn, ax5, fig3,
-                         (cmap, color, linewidth, 'Normal Force $p_n$ [N/m]'))
+                         (i, cmap, color, linewidth, 4, 'Normal Force $p_n$ [N/m]'))
             contour_plot(az_grid, r_grid, pt, ax6, fig3,
-                         (cmap, color, linewidth, 'Tangential Force $p_t$ [N/m]'))
+                         (i, cmap, color, linewidth, 5, 'Tangential Force $p_t$ [N/m]'))
 
             contour_plot(az_grid, r_grid, un, ax7, fig4,
-                         (cmap, color, linewidth, 'Normal Velocity $u_n$ [m/s]'))
+                         (i, cmap, color, linewidth, 6, 'Normal Velocity $u_n$ [m/s]'))
             contour_plot(az_grid, r_grid, ut, ax8, fig4,
-                         (cmap, color, linewidth, 'Tangential Velocity $u_t$ [m/s]'))
+                         (i, cmap, color, linewidth, 7, 'Tangential Velocity $u_t$ [m/s]'))
 
-            fig1.tight_layout()
-            fig2.tight_layout()
-            fig3.tight_layout()
-            fig4.tight_layout()
-            plt.show()
+            # fig1.tight_layout()
+            # fig2.tight_layout()
+            # fig3.tight_layout()
+            # fig4.tight_layout()
+        plt.show()
 
 
-def contour_plot(az_grid, r_grid, values, axis, figure, options: tuple):
+def create_axes(num):
+    fig, axes = plt.subplots(3, 2, num=num, subplot_kw=dict(projection='polar'), figsize=(8, 12), sharey='all')
+    ax1, ax2 = axes.T
+    fig.subplots_adjust(0.05, 0.02, 1, .95, .1, .1)
+
+    return fig, (ax1, ax2)
+
+
+def contour_plot(az_grid, r_grid, values, axes, figure, options: tuple):
     def contour_levels():
         base_levels = np.linspace(0, 1, 1000)
 
-        val_min = np.min(values)
-        val_max = np.max(values)
+        minima = (2, 2, 0, 0, 500, 50, 3, 10)
+        maxima = (12, 20, .6, .06, 4500, 450, 8, 90)
+        nticks = (11, 10, 11, 11, 9, 9, 11, 9)
 
-        return base_levels * (val_max - val_min) + val_min
+        return (base_levels * (maxima[qtt] - minima[qtt]) + minima[qtt],
+                np.linspace(minima[qtt], maxima[qtt], nticks[qtt]))
 
-    cmap, color, linewidth, label, *_ = options
+    idx, cmap, color, linewidth, qtt, label, *_ = options
 
-    axis.set_title(label)
-    ctr = axis.contourf(az_grid, r_grid, values, contour_levels(), cmap=cmap)
+    axis = axes[idx]
+
+    levels, ticks = contour_levels()
+
+    ctr = axis.contourf(az_grid, r_grid, values, levels, cmap=cmap)
     ctr1 = axis.contour(az_grid, r_grid, values, colors=color, linewidths=linewidth)
     axis.set_yticks(np.arange(0, 50 + 10, 10))
-    cbar = figure.colorbar(ctr, ax=axis, ticks=ctr1.levels)
+    cbar = figure.colorbar(ctr, ax=axis, ticks=ticks)
+
+    if not idx:
+        axis.set_title(label)
 
 
 def xi(a, yaw):
