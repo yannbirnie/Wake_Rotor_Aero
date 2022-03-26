@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.integrate as spig
 import matplotlib.pyplot as plt
+import time
 
 
 relaxation = 0.1
@@ -20,6 +21,20 @@ class DU95W150:
     def cd(self, alpha): return np.interp(alpha, self.alpha_lst, self.cd_lst)
 
     def cm(self, alpha): return np.interp(alpha, self.alpha_lst, self.cm_lst)
+
+    def plot_polars(self, axes):
+        axes[0].plot(self.alpha_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)],
+                     self.cl_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)], 'k')
+        axes[1].plot(self.cd_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)],
+                     self.cl_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)], 'k')
+
+        optimal = np.argmax(self.cl_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)] /
+                            self.cd_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)])
+
+        axes[0].plot(self.alpha_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)][optimal],
+                     self.cl_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)][optimal], 'ro')
+        axes[1].plot(self.cd_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)][optimal],
+                     self.cl_lst[np.logical_and(self.alpha_lst >= -6, self.alpha_lst <= 12)][optimal], 'ro')
 
 
 class BladeElement:
@@ -45,7 +60,7 @@ class BladeElement:
     def __repr__(self):
         return f"<Blade Element at r={self.r}, c={self.c}, beta={self.beta}>"
 
-    def determine_loads(self, v_0, omega, theta_p, b, r_blade, r_root, yaw, azimuth):
+    def determine_loads(self, v_0, omega, theta_p, b, r_blade, r_root, yaw, azimuth, loss=True):
         yaw = np.radians(yaw)
         azimuth = np.radians(azimuth)
         # Set initial loop values
@@ -72,14 +87,14 @@ class BladeElement:
             ct = cl * np.sin(self.phi) - cd * np.cos(self.phi)
 
             # Break conditions for the a-loop
-            if error_a <= 1e-6 and error_a_dash <= 1e-6:
+            if error_a <= 1e-9 and error_a_dash <= 1e-9:
                 break
             elif i > 1e3:
                 raise ValueError(f"r={self.r}: Solution for a and a' not converging. a={self.a}, a' = {self.a_prime}.")
 
             # Determine the solidity and Prandtl’s tip loss correction
             solidity = self.c * b / (2 * np.pi * self.r)
-            f_tip = (2/np.pi) * np.arccos(np.exp(-(b * (r_blade - self.r) / (2 * self.r * np.sin(abs(self.phi))))))
+            f_tip = (2/np.pi) * np.arccos(np.exp(-(b * (r_blade - self.r) / (2 * self.r * np.sin(abs(self.phi)))))) if loss else 1
             f_root = (2 / np.pi) * np.arccos(np.exp(-(b * (self.r - r_root) / (2 * self.r * np.sin(abs(self.phi))))))
             f = f_root * f_tip
 
@@ -171,12 +186,12 @@ class Blade:
         self.r_list = np.array(self.r_list)
         self.r = r_end
 
-    def find_pn_pt(self, v_0, theta_p, omega, yaw, azimuth):
+    def find_pn_pt(self, v_0, theta_p, omega, yaw, azimuth, loss=True):
         # Initialise the lists for p_n and p_t
         p_n_list, p_t_list = list(), list()
         for blade in self.blade_elements:
             if self.r_list[0] < blade.r < self.r:
-                blade.determine_loads(v_0, omega, theta_p, self.b, self.r, self.r_list[0], yaw, azimuth)
+                blade.determine_loads(v_0, omega, theta_p, self.b, self.r, self.r_list[0], yaw, azimuth, loss=loss)
                 p_n, p_t = blade.get_loads()
 
                 p_n_list.append(p_n)
@@ -189,11 +204,11 @@ class Blade:
 
         return np.array(p_n_list), np.array(p_t_list), self.r_list
 
-    def determine_cp_ct(self, v_0, lamda, theta_p, yaw, azimuth):
+    def determine_cp_ct(self, v_0, lamda, theta_p, yaw, azimuth, loss=True):
         # Determine the rotational speed of the turbine
         omega = lamda * v_0 / self.r
         # Get the loads on the blade elements
-        self.p_n_list, self.p_t_list, r_list = self.find_pn_pt(v_0, theta_p, omega, yaw, azimuth)
+        self.p_n_list, self.p_t_list, r_list = self.find_pn_pt(v_0, theta_p, omega, yaw, azimuth, loss=loss)
 
         # Determine the thrust and power of the turbine
         self.thrust = self.b * spig.trapz(self.p_n_list, self.r_list)
@@ -209,15 +224,20 @@ class Blade:
 
 
 class Turbine:
-    def __init__(self):
-        self.blade = Blade(3, DU95W150, .2 * 50, 50, -2, 20)
+    def __init__(self, n_annuli):
+        self.blade = Blade(3, DU95W150, .2 * 50, 50, -2, n_annuli)
 
     def cp_lamda(self):
         tsr = np.round(np.arange(4, 12.1, 0.1), 1)
         cp = np.zeros(tsr.shape)
+        thrust = np.zeros(tsr.shape)
+        torque = np.zeros(tsr.shape)
+
         for i, lamda in enumerate(tsr):
             self.blade.determine_cp_ct(10, lamda, 0, 0, 0)
             cp[i] = self.blade.c_power
+            thrust[i] = self.blade.thrust
+            torque[i] = self.blade.power / (lamda * 10 / self.blade.r)
 
             if lamda in (6, 8, 10):
                 plt.plot(lamda, self.blade.c_power, 'k^')
@@ -228,44 +248,81 @@ class Turbine:
         plt.ylabel("$C_P\\ [-]$")
         plt.tight_layout()
         plt.plot(tsr, cp, 'k')
+        plt.savefig('cp-lambda.pdf')
+        plt.grid()
+        plt.show()
+
+        fig, ax1 = plt.subplots()
+
+        ax1.plot(tsr, thrust / 1e3, color='tab:blue')
+        ax1.set_xlabel('$\\lambda$ [-]')
+        ax1.set_ylabel('$T$ [kN]', color='tab:blue')
+        ax1.tick_params(axis='y', colors='tab:blue')
+        ax1.set_yticks(np.linspace(0, 450, 10))
+
+        ax2 = ax1.twinx()
+        ax2.plot(tsr, torque / 1e3, color='tab:orange')
+        ax2.set_ylabel('$Q$ [kNm]', color='tab:orange')
+        ax2.tick_params(axis='y', colors='tab:orange')
+        ax2.set_yticks(np.linspace(600, 1500, 10))
+
+        plt.tight_layout()
+        ax1.grid()
+        ax2.grid()
+        plt.savefig('cp-thrust-torque.pdf')
+
         plt.show()
 
     def spanwise_distributions(self):
-        self.blade.determine_cp_ct(10, 8, 0, 0, 0)
-        pn, pt = self.blade.p_n_list, self.blade.p_t_list
-        alpha, phi, a, a_prime, twist = np.zeros((5, len(self.blade.blade_elements)))
-        for i, be in enumerate(self.blade.blade_elements):
-            alpha[i] = be.alpha
-            phi[i] = be.phi
-            a[i] = be.a
-            a_prime[i] = be.a_prime
-            twist[i] = be.beta
+        linestyles = ('dashed', 'solid', 'dotted')
+        for j, tsr in enumerate((6, 8, 10)):
+            self.blade.determine_cp_ct(10, tsr, 0, 0, 0)
+            pn, pt = self.blade.p_n_list, self.blade.p_t_list
+            alpha, phi, a, a_prime, twist = np.zeros((5, len(self.blade.blade_elements)))
+            for i, be in enumerate(self.blade.blade_elements):
+                alpha[i] = be.alpha
+                phi[i] = be.phi
+                a[i] = be.a
+                a_prime[i] = be.a_prime
+                twist[i] = be.beta
+
+            plt.figure(1)
+            plt.plot(self.blade.r_list, alpha, linestyle=linestyles[j], color='tab:blue', label=f'Angle of Attack ($\\alpha$) ($\\lambda={tsr}$)')
+            plt.plot(self.blade.r_list, np.degrees(phi), linestyle=linestyles[j], color='tab:orange', label=f'Inflow Angle ($\\phi$) ($\\lambda={tsr}$)')
+            # plt.plot(self.blade.r_list, twist, label=f'Twist Angle ($\\beta$)')
+            plt.xlabel('$r$ [m]')
+            plt.ylabel('$Angle$ [$^{\\circ}$]')
+
+            plt.figure(2)
+            plt.plot(self.blade.r_list, a, linestyle=linestyles[j], color='tab:blue', label=f'Axial Induction ($a$) ($\\lambda={tsr}$)')
+            plt.plot(self.blade.r_list, a_prime, linestyle=linestyles[j], color='tab:orange', label=f"Azimuthal Induction ($a'$) ($\\lambda={tsr}$)")
+            plt.xlabel('$r$ [m]')
+            plt.ylabel('$Induction\\ factor$ [-]')
+            plt.yticks(np.arange(0, 0.6, 0.1))
+
+            plt.figure(3)
+            plt.plot(self.blade.r_list, pn, linestyle=linestyles[j], color='tab:blue', label=f'Thrust Loading ($p_n$) ($\\lambda={tsr}$)')
+            plt.plot(self.blade.r_list, pt, linestyle=linestyles[j], color='tab:orange', label=f'Azimuthal Loading ($p_t$) ($\\lambda={tsr}$)')
+            plt.xlabel('$r$ [m]')
+            plt.ylabel('$p$ [N/m]')
 
         plt.figure(1)
-        plt.plot(self.blade.r_list, alpha, label='Angle of Attack ($\\alpha$)')
-        plt.plot(self.blade.r_list, np.degrees(phi), label='Inflow Angle ($\\phi$)')
-        plt.plot(self.blade.r_list, twist, label='Twist Angle ($\\beta$)')
-        plt.xlabel('$r$ [m]')
-        plt.ylabel('$Angle$ [$^{\\circ}$]')
         plt.grid()
         plt.legend()
+        plt.tight_layout()
+        plt.savefig('Angles_no_yaw.pdf')
 
         plt.figure(2)
-        plt.plot(self.blade.r_list, a, label='Axial Induction ($a$)')
-        plt.plot(self.blade.r_list, a_prime, label="Azimuthal Induction ($a'$)")
-        plt.xlabel('$r$ [m]')
-        plt.ylabel('$Induction\\ factor$ [-]')
-        plt.yticks(np.arange(0, 0.6, 0.1))
         plt.grid()
         plt.legend()
+        plt.tight_layout()
+        plt.savefig('Inductions_no_yaw.pdf')
 
         plt.figure(3)
-        plt.plot(self.blade.r_list, pn, label='Thrust Loading ($p_n$)')
-        plt.plot(self.blade.r_list, pt, label="Azimuthal Loading ($p_t$)")
-        plt.xlabel('$r$ [m]')
-        plt.ylabel('$p$ [N/m]')
         plt.grid()
         plt.legend()
+        plt.tight_layout()
+        plt.savefig('Forces_no_yaw.pdf')
 
         plt.show()
 
@@ -300,36 +357,84 @@ class Turbine:
             linewidth = .5
 
             contour_plot(az_grid, r_grid, alpha, ax1, fig1,
-                         (i, cmap, color, linewidth, 0, 'Angle of Attack $\\alpha$ [$^{\\circ}$]'))
+                         (i, y, cmap, color, linewidth, 0, 'Angle of Attack $\\alpha$ [$^{\\circ}$]'))
             contour_plot(az_grid, r_grid, np.degrees(phi), ax2, fig1,
-                         (i, cmap, color, linewidth, 1, 'Inflow Angle $\\phi$ [$^{\\circ}$]'))
+                         (i, y, cmap, color, linewidth, 1, 'Inflow Angle $\\phi$ [$^{\\circ}$]'))
 
             contour_plot(az_grid, r_grid, a, ax3, fig2,
-                         (i, cmap, color, linewidth, 2, 'Axial Induction $a_{total}$ [-]'))
+                         (i, y, cmap, color, linewidth, 2, 'Axial Induction $a_{total}$ [-]'))
             contour_plot(az_grid, r_grid, a_prime, ax4, fig2,
-                         (i, cmap, color, linewidth, 3, "Azimuthal Induction $a'$ [-]"))
+                         (i, y, cmap, color, linewidth, 3, "Azimuthal Induction $a'$ [-]"))
 
             contour_plot(az_grid, r_grid, pn, ax5, fig3,
-                         (i, cmap, color, linewidth, 4, 'Normal Force $p_n$ [N/m]'))
+                         (i, y, cmap, color, linewidth, 4, 'Normal Force $p_n$ [N/m]'))
             contour_plot(az_grid, r_grid, pt, ax6, fig3,
-                         (i, cmap, color, linewidth, 5, 'Tangential Force $p_t$ [N/m]'))
+                         (i, y, cmap, color, linewidth, 5, 'Tangential Force $p_t$ [N/m]'))
 
             contour_plot(az_grid, r_grid, un, ax7, fig4,
-                         (i, cmap, color, linewidth, 6, 'Normal Velocity $u_n$ [m/s]'))
+                         (i, y, cmap, color, linewidth, 6, 'Normal Velocity $u_n$ [m/s]'))
             contour_plot(az_grid, r_grid, ut, ax8, fig4,
-                         (i, cmap, color, linewidth, 7, 'Tangential Velocity $u_t$ [m/s]'))
+                         (i, y, cmap, color, linewidth, 7, 'Tangential Velocity $u_t$ [m/s]'))
 
             # fig1.tight_layout()
             # fig2.tight_layout()
             # fig3.tight_layout()
             # fig4.tight_layout()
+
+        fig1.savefig('Angles.png')
+        fig2.savefig('Inductions.png')
+        fig3.savefig('Forces.png')
+        fig4.savefig('Velocities.png')
+        plt.show()
+
+    def loss_comparison(self):
+        linestyles = ('solid', 'dashed')
+        for j in range(2):
+            self.blade.determine_cp_ct(10, 8, 0, 0, 0, loss=bool(j))
+
+            alpha, phi, a, a_prime, twist = np.zeros((5, len(self.blade.blade_elements[1:-1])))
+            for i, be in enumerate(self.blade.blade_elements[1:-1]):
+                a[i] = be.a
+                a_prime[i] = be.a_prime
+
+            if j:
+                txt = '(with tip correction)'
+            else:
+                txt = '(without tip correction)'
+
+            plt.figure(1)
+            plt.plot(self.blade.r_list[1:-1], a, linestyle=linestyles[j], color='tab:blue', label=f'Axial Induction ($a$) {txt}')
+            plt.plot(self.blade.r_list[1:-1], a_prime, linestyle=linestyles[j], color='tab:orange', label=f"Azimuthal Induction ($a'$) {txt}")
+            plt.figure(2)
+            plt.plot(self.blade.r_list[1:-1], self.blade.p_n_list[1:-1], linestyle=linestyles[j], color='tab:blue', label=f'Thrust Loading ($p_n$) {txt}')
+            plt.plot(self.blade.r_list[1:-1], self.blade.p_t_list[1:-1], linestyle=linestyles[j], color='tab:orange', label=f'Azimuthal Loading ($p_t$) {txt}')
+            self.blade.reset()
+
+        plt.figure(1)
+        plt.ylim(0, .5)
+        plt.grid()
+        plt.xlabel('$r$ [m]')
+        plt.ylabel('$Induction\\ factor$ [-]')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('Tip_loss_induction.pdf')
+
+        plt.figure(2)
+        plt.ylim(0, 4500)
+        plt.grid()
+        plt.xlabel('$r$ [m]')
+        plt.ylabel('$p$ [N/m]')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('Tip_loss_forces.pdf')
+
         plt.show()
 
 
 def create_axes(num):
-    fig, axes = plt.subplots(3, 2, num=num, subplot_kw=dict(projection='polar'), figsize=(8, 12), sharey='all')
+    fig, axes = plt.subplots(3, 2, num=num, subplot_kw=dict(projection='polar'), figsize=(9, 12), sharey='all')
     ax1, ax2 = axes.T
-    fig.subplots_adjust(0.05, 0.02, 1, .95, .1, .1)
+    fig.subplots_adjust(0.07, 0.01, .98, .97, .12, .1)
 
     return fig, (ax1, ax2)
 
@@ -345,19 +450,22 @@ def contour_plot(az_grid, r_grid, values, axes, figure, options: tuple):
         return (base_levels * (maxima[qtt] - minima[qtt]) + minima[qtt],
                 np.linspace(minima[qtt], maxima[qtt], nticks[qtt]))
 
-    idx, cmap, color, linewidth, qtt, label, *_ = options
+    idx, theta, cmap, color, linewidth, qtt, label, *_ = options
 
     axis = axes[idx]
 
     levels, ticks = contour_levels()
 
     ctr = axis.contourf(az_grid, r_grid, values, levels, cmap=cmap)
-    ctr1 = axis.contour(az_grid, r_grid, values, colors=color, linewidths=linewidth)
+    ctr1 = axis.contour(az_grid, r_grid, values, ticks, colors=color, linewidths=linewidth)
     axis.set_yticks(np.arange(0, 50 + 10, 10))
     cbar = figure.colorbar(ctr, ax=axis, ticks=ticks)
 
     if not idx:
         axis.set_title(label)
+    if not qtt % 2:
+        axis.set_ylabel(f'$\\theta = {theta}' + '^{\\circ}$')
+        axis.yaxis.set_label_coords(-0.13, 0.5)
 
 
 def xi(a, yaw):
@@ -393,11 +501,78 @@ def read_from_file(path):
     return np.array(out_list)
 
 
+def convergence():
+    thrust = []
+    annuli = np.arange(5, 1000 + 5, 5)
+    times = []
+
+    for n in annuli:
+        print(n)
+        blade = Blade(3, DU95W150, .2 * 50, 50, -2, n)
+        t0 = time.time()
+        blade.determine_cp_ct(10, 8, 0, 0, 0)
+        times.append(time.time() - t0)
+        thrust.append(blade.c_thrust)
+
+    plt.figure(1)
+    plt.hlines(max(thrust), 0, annuli[-1], linestyles='dotted')
+    plt.plot(annuli, thrust)
+    plt.xlabel('$N$ [-]')
+    plt.ylabel('$C_T$ [-]')
+    plt.grid()
+    plt.savefig('Convergence_History.pdf')
+
+    plt.figure(2)
+    plt.plot(annuli, times)
+
+    plt.figure(3)
+    plt.plot(annuli, (max(thrust) - np.array(thrust)) / np.array(times))
+    plt.show()
+
+
+def airfoil_polars():
+    airfoil = DU95W150()
+    fig, axes = plt.subplots(1, 2, sharey='all')
+    airfoil.plot_polars(axes)
+    blade = Blade(3, DU95W150, .2 * 50, 50, -2, 50)
+    blade.determine_cp_ct(10, 8, 0, 0, 0)
+
+    alpha = []
+    chord = []
+    radius = []
+    for be in blade.blade_elements[1:-1]:
+        alpha.append(be.alpha)
+        chord.append(be.c)
+        radius.append(be.r)
+
+    alpha_mm = [min(alpha), max(alpha)]
+    axes[0].plot(alpha_mm, [airfoil.cl(a) for a in alpha_mm], 'k^')
+    axes[0].set_xlabel('$\\alpha$ [$^{\\circ}$]')
+    axes[0].set_ylabel('$C_l$ [-]')
+    axes[1].plot([airfoil.cd(a) for a in alpha_mm], [airfoil.cl(a) for a in alpha_mm], 'k^')
+    axes[1].set_xlabel('$C_d$ [-]')
+
+    plt.tight_layout()
+    plt.savefig('polars.pdf')
+    axes[0].grid()
+    axes[1].grid()
+    plt.show()
+
+    fig, axes = plt.subplots(2, 1, sharex='all')
+    axes[0].plot(radius, [airfoil.cl(a) for a in alpha])
+    axes[1].plot(radius, chord)
+    plt.show()
+
+
 if __name__ == '__main__':
-    turbine = Turbine()
-    # turbine.cp_lamda()
-    # turbine.spanwise_distributions()
+    convergence()
+    airfoil_polars()
+
+    turbine = Turbine(50)
+    turbine.cp_lamda()
+    turbine.spanwise_distributions()
     turbine.yaw_polar_plots()
+    turbine.loss_comparison()
 
     # a = .82
     # yaw = np.radians(30)
