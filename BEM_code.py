@@ -161,11 +161,11 @@ class BladeElement:
 
     def get_static_pressure_before_rotor(self):
         # Using bernoulli
-        return p_atm + 0.5 * rho * (self.u_normal**2 * (1-(1-self.a)**2))
+        return p_atm - 0.5 * rho * (self.u_normal**2 * (1-(1-self.a)**2))
 
     def get_static_pressure_after_rotor(self):
         u02 = self.u_normal**2
-        return p_atm + 0.5 * rho * (u02*(1-self.a)**2 + u02*(1-2*self.a)**2)
+        return p_atm - 0.5 * rho * ( (u02*(1-self.a)**2 + u02*(1-2*self.a)**2) )
 
     def reset(self):
         self.__init__(self.r, self.c, self.beta, self.af)
@@ -463,12 +463,16 @@ class Turbine:
             enthalpies[2,i] = pressure_after_rotor/rho + 0.5*v_0**2 * (-(1-be.a)**2 + (1-2*be.a)**2)
             enthalpies[3,i] = p_atm/rho + 0.5 * v_0**2*(1-2*be.a)**2
 
+        # Skipping the first & last index, so remove those columns
+        enthalpies = np.delete(enthalpies, [0, -1], 1)
+        r_sliced = np.delete(self.blade.r_list, [0, -1])
+
         # Do some nice plotssss
         plt.figure(1)
-        plt.plot(self.blade.r_list, enthalpies[0], label='upwind')
-        plt.plot(self.blade.r_list, enthalpies[1], label='upwind rotor')
-        plt.plot(self.blade.r_list, enthalpies[2], label='downwind rotor')
-        plt.plot(self.blade.r_list, enthalpies[3], label='downwind')
+        plt.plot(r_sliced, enthalpies[0], label='upwind', color='b')
+        plt.plot(r_sliced, enthalpies[1], label='upwind rotor', color='tab:orange')
+        plt.plot(r_sliced, enthalpies[2], label='downwind rotor', color='tab:brown')
+        plt.plot(r_sliced, enthalpies[3], label='downwind', color='c')
         plt.xlabel('$r$ [m]')
         plt.ylabel('relative Specific enthalpy')
         plt.grid()
@@ -610,14 +614,14 @@ def airfoil_polars():
 
 
 if __name__ == '__main__':
-    convergence()
-    airfoil_polars()
+    #convergence()
+    #airfoil_polars()
 
     turbine = Turbine(50)
-    turbine.cp_lamda()
-    turbine.spanwise_distributions()
-    turbine.yaw_polar_plots()
-    turbine.loss_comparison()
+    #turbine.cp_lamda()
+    #turbine.spanwise_distributions()
+    #turbine.yaw_polar_plots()
+    #turbine.loss_comparison()
     turbine.enthalpy_distributions(10)
 
     # a = .82
