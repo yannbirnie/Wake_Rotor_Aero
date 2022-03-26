@@ -479,6 +479,32 @@ class Turbine:
         plt.legend()
         plt.show()
 
+    def enthalpy_trial(self):
+        self.blade.determine_cp_ct(10, 8, 0, 0, 0)
+        a = solve_a(self.blade.c_power)
+
+        p01 = p_atm + .5 * 1.225 * 10 ** 2
+        p2 = p01 - .5 * 1.225 * (10 * (1 - a)) ** 2
+        p04 = p_atm + .5 * 1.225 * (10 * (1 - 2 * a)) ** 2
+        p3 = p04 - .5 * 1.225 * (10 * (1 - a)) ** 2
+
+        a_lst = np.zeros(len(self.blade.blade_elements[1:-1]))
+        for i, be in enumerate(self.blade.blade_elements[1:-1]):
+            a_lst[i] = be.a
+
+        hs1 = (p_atm / 1.225 + .5 * 10 ** 2) * np.ones(len(self.blade.blade_elements[1:-1]))
+        hs2 = p2 / 1.225 + .5 * (10 * (1 - a_lst)) ** 2
+        hs3 = p3 / 1.225 + .5 * (10 * (1 - a_lst)) ** 2
+        hs4 = p_atm / 1.225 + .5 * (10 * (1 - 2 * a_lst)) ** 2
+
+        plt.plot(self.blade.r_list[1:-1], hs1, label='Infinity Upwind')
+        plt.plot(self.blade.r_list[1:-1], hs2, label='Upwind Rotor')
+        plt.plot(self.blade.r_list[1:-1], hs3, label='Downwind Rotor')
+        plt.plot(self.blade.r_list[1:-1], hs4, label='Infinity Downwind')
+        plt.legend()
+        plt.grid()
+        plt.show()
+
 
 def create_axes(num):
     fig, axes = plt.subplots(3, 2, num=num, subplot_kw=dict(projection='polar'), figsize=(9, 12), sharey='all')
@@ -537,6 +563,19 @@ def xi(a, yaw):
 #     else:
 #         print(f'Not converged for yaw={yaw}, a={a}.')
 #         return yaw
+
+
+def solve_a(cp):
+    a_lst = np.arange(0, .33, .001)
+    cp_lst = 4 * a_lst * (1 - a_lst)**2
+
+    cp_lower = cp_lst[cp_lst < cp][-1]
+    cp_upper = cp_lst[cp_lst >= cp][0]
+
+    a_lower = a_lst[cp_lst < cp][-1]
+    a_upper = a_lst[cp_lst >= cp][0]
+
+    return interpolate(a_lower, a_upper, cp_lower, cp_upper, cp)
 
 
 def interpolate(value1, value2, co1, co2, co_interpolation):
@@ -614,15 +653,15 @@ def airfoil_polars():
 
 
 if __name__ == '__main__':
-    #convergence()
-    #airfoil_polars()
+    # convergence()
+    # airfoil_polars()
 
     turbine = Turbine(50)
-    #turbine.cp_lamda()
-    #turbine.spanwise_distributions()
-    #turbine.yaw_polar_plots()
-    #turbine.loss_comparison()
-    turbine.enthalpy_distributions(10)
+    # turbine.cp_lamda()
+    # turbine.spanwise_distributions()
+    # turbine.yaw_polar_plots()
+    # turbine.loss_comparison()
+    turbine.enthalpy_trial()
 
     # a = .82
     # yaw = np.radians(30)
