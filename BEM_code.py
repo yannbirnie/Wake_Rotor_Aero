@@ -481,16 +481,17 @@ class Turbine:
 
     def enthalpy_trial(self):
         self.blade.determine_cp_ct(10, 8, 0, 0, 0)
-        a = solve_a(self.blade.c_power)
+
+        a_lst = np.zeros(len(self.blade.blade_elements[1:-1]))
+        for i, be in enumerate(self.blade.blade_elements[1:-1]):
+            a_lst[i] = be.a
+
+        a = spig.trapz(a_lst, self.blade.r_list[1:-1]) / (self.blade.r_list[1:-1][-1] - self.blade.r_list[1:-1][0])
 
         p01 = p_atm + .5 * 1.225 * 10 ** 2
         p2 = p01 - .5 * 1.225 * (10 * (1 - a)) ** 2
         p04 = p_atm + .5 * 1.225 * (10 * (1 - 2 * a)) ** 2
         p3 = p04 - .5 * 1.225 * (10 * (1 - a)) ** 2
-
-        a_lst = np.zeros(len(self.blade.blade_elements[1:-1]))
-        for i, be in enumerate(self.blade.blade_elements[1:-1]):
-            a_lst[i] = be.a
 
         hs1 = (p_atm / 1.225 + .5 * 10 ** 2) * np.ones(len(self.blade.blade_elements[1:-1]))
         hs2 = p2 / 1.225 + .5 * (10 * (1 - a_lst)) ** 2
