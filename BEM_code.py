@@ -660,9 +660,9 @@ if __name__ == '__main__':
     turbine = Turbine(50)
     # turbine.cp_lamda()
     # turbine.spanwise_distributions()
-    # turbine.yaw_polar_plots()
+    turbine.yaw_polar_plots()
     # turbine.loss_comparison()
-    turbine.enthalpy_trial()
+    # turbine.enthalpy_trial()
 
     # a = .82
     # yaw = np.radians(30)
